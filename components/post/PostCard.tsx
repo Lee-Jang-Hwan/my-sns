@@ -48,7 +48,8 @@ interface PostCardProps {
   postId?: string; // 게시물 ID (이미지 클릭 시 상세 페이지 링크용)
   // Actions props
   isLiked?: boolean; // 좋아요 상태 (기본값: false)
-  onLikeClick?: () => void; // 좋아요 클릭 핸들러 (선택)
+  onLikeClick?: () => void; // 좋아요 클릭 핸들러 (선택, API 호출 후 호출됨)
+  onLikeUpdate?: (liked: boolean, likeCount: number) => void; // 좋아요 상태 업데이트 콜백 (선택)
   onCommentClick?: () => void; // 댓글 클릭 핸들러 (선택)
   // Content props
   likeCount?: number; // 좋아요 수 (기본값: 0)
@@ -68,6 +69,7 @@ export default function PostCard({
   postId,
   isLiked = false,
   onLikeClick,
+  onLikeUpdate,
   onCommentClick,
   likeCount = 0,
   caption,
@@ -76,13 +78,19 @@ export default function PostCard({
   onViewMoreComments,
 }: PostCardProps) {
   const [liked, setLiked] = useState(isLiked);
+  const [currentLikeCount, setCurrentLikeCount] = useState(likeCount);
   const [isAnimating, setIsAnimating] = useState(false);
   const [showFullCaption, setShowFullCaption] = useState(false);
+  const [showDoubleTapHeart, setShowDoubleTapHeart] = useState(false);
 
-  // isLiked prop 변경 시 state 동기화
+  // isLiked, likeCount prop 변경 시 state 동기화
   useEffect(() => {
     setLiked(isLiked);
   }, [isLiked]);
+
+  useEffect(() => {
+    setCurrentLikeCount(likeCount);
+  }, [likeCount]);
 
   // 캡션이 2줄을 초과하는지 확인
   const shouldTruncateCaption = caption && caption.length > 80; // 대략적인 2줄 기준
@@ -97,20 +105,103 @@ export default function PostCard({
     : comments.length > previewComments.length;
 
   // 좋아요 클릭 핸들러
-  const handleLikeClick = () => {
-    // 애니메이션 시작
-    setIsAnimating(true);
-    setLiked((prev) => !prev);
+  const handleLikeClick = async () => {
+    if (!postId) return;
 
-    // API 호출 (있는 경우)
-    if (onLikeClick) {
-      onLikeClick();
-    }
+    // Optimistic UI 업데이트
+    const previousLiked = liked;
+    const previousLikeCount = currentLikeCount;
+    const newLiked = !liked;
+    const newLikeCount = newLiked ? currentLikeCount + 1 : Math.max(0, currentLikeCount - 1);
+
+    // 즉시 UI 업데이트
+    setIsAnimating(true);
+    setLiked(newLiked);
+    setCurrentLikeCount(newLikeCount);
 
     // 애니메이션 종료 (0.15초 후)
     setTimeout(() => {
       setIsAnimating(false);
     }, 150);
+
+    try {
+      // API 호출
+      const method = newLiked ? 'POST' : 'DELETE';
+      const response = await fetch('/api/likes', {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ postId }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // 성공 시 부모 컴포넌트에 알림
+      if (onLikeUpdate) {
+        onLikeUpdate(newLiked, newLikeCount);
+      }
+
+      // onLikeClick 콜백 호출 (있는 경우)
+      if (onLikeClick) {
+        onLikeClick();
+      }
+    } catch (error) {
+      console.error('Failed to toggle like:', error);
+      // 실패 시 롤백
+      setLiked(previousLiked);
+      setCurrentLikeCount(previousLikeCount);
+      // 에러 알림 (필요시 토스트 메시지 추가 가능)
+    }
+  };
+
+  // 더블탭 좋아요 핸들러
+  const handleDoubleClick = async () => {
+    if (!postId || !imageUrl) return;
+
+    // 이미 좋아요한 경우 더블탭 시 좋아요 취소하지 않음 (Instagram 동작)
+    if (liked) return;
+
+    // 큰 하트 애니메이션 표시
+    setShowDoubleTapHeart(true);
+    setTimeout(() => {
+      setShowDoubleTapHeart(false);
+    }, 1200);
+
+    // 좋아요 추가 (API 호출)
+    const previousLiked = liked;
+    const previousLikeCount = currentLikeCount;
+    const newLikeCount = currentLikeCount + 1;
+
+    // 즉시 UI 업데이트
+    setLiked(true);
+    setCurrentLikeCount(newLikeCount);
+
+    try {
+      const response = await fetch('/api/likes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ postId }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // 성공 시 부모 컴포넌트에 알림
+      if (onLikeUpdate) {
+        onLikeUpdate(true, newLikeCount);
+      }
+    } catch (error) {
+      console.error('Failed to add like via double tap:', error);
+      // 실패 시 롤백
+      setLiked(previousLiked);
+      setCurrentLikeCount(previousLikeCount);
+    }
   };
 
   // 댓글 클릭 핸들러
@@ -183,19 +274,35 @@ export default function PostCard({
       </header>
 
       {/* Image 영역 (1:1 정사각형) */}
-      <div className="w-full aspect-square relative bg-gray-100 overflow-hidden">
+      <div
+        className="w-full aspect-square relative bg-gray-100 overflow-hidden cursor-pointer"
+        onDoubleClick={handleDoubleClick}
+      >
         {imageUrl ? (
           <Image
             src={imageUrl}
             alt={`${username}의 게시물`}
             fill
-            className="object-cover"
+            className="object-cover select-none"
             sizes="(max-width: 768px) 100vw, 630px"
             priority={false}
+            draggable={false}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gray-100">
             <span className="text-gray-400 text-sm">이미지 없음</span>
+          </div>
+        )}
+
+        {/* 더블탭 큰 하트 애니메이션 */}
+        {showDoubleTapHeart && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+            <Heart
+              className="w-20 h-20 fill-[#ed4956] text-[#ed4956]"
+              style={{
+                animation: 'doubleTapHeart 1.2s ease-in-out',
+              }}
+            />
           </div>
         )}
       </div>
@@ -257,9 +364,9 @@ export default function PostCard({
       {/* Content 영역 */}
       <div className="px-4 pb-4 space-y-2">
         {/* 좋아요 수 */}
-        {likeCount > 0 && (
+        {currentLikeCount > 0 && (
           <div className="text-sm font-bold text-[#262626]">
-            좋아요 {likeCount.toLocaleString()}개
+            좋아요 {currentLikeCount.toLocaleString()}개
           </div>
         )}
 

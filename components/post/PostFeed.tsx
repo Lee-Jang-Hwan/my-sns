@@ -162,6 +162,24 @@ export default function PostFeed({ userId, initialPosts }: PostFeedProps) {
     };
   }, [hasMore, loadingMore, loading, loadMorePosts]);
 
+  // 좋아요 업데이트 핸들러
+  const handleLikeUpdate = useCallback(
+    (postId: string, liked: boolean, likeCount: number) => {
+      setPosts((prevPosts) =>
+        prevPosts.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                is_liked: liked,
+                like_count: likeCount,
+              }
+            : post
+        )
+      );
+    },
+    []
+  );
+
   // Post 데이터를 PostCard props로 변환
   const mapPostToCardProps = (post: Post) => {
     const comments =
@@ -184,6 +202,8 @@ export default function PostFeed({ userId, initialPosts }: PostFeedProps) {
       isLiked: post.is_liked || false,
       comments,
       totalComments: post.total_comments || post.comments?.length || 0,
+      onLikeUpdate: (liked: boolean, likeCount: number) =>
+        handleLikeUpdate(post.id, liked, likeCount),
     };
   };
 

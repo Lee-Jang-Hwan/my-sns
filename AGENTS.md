@@ -208,3 +208,10 @@ const searchParams = await props.searchParams;
 - `.cursor/rules/supabase/`: Supabase 관련 규칙들
 
 주요 원칙은 이 CLAUDE.md에 통합되어 있으나, 세부사항은 해당 파일들 참고.
+
+## Agent Workflow: Reading Linked Detail Docs
+
+- TODO 문서(`docs/TODO.md`)의 각 섹션에 Markdown 링크가 있으면, 해당 링크의 파일을 반드시 열어 요약한다.
+  - 절대 경로가 주어지면 그대로 사용한다.
+  - 절대 경로가 없으면, 링크를 리포지터리 루트 기준으로 해석하여 실제 파일을 연다. 예: `./feature/homefeed/homefeed.md` → `/Users/yuhannala/Documents/Github/MY-SNS/docs/feature/homefeed/homefeed.md`
+- 사용 예: "@TODO.md 홈피드 페이지 확인" 요청만으로도 에이전트는 링크된 파일을 열어 TODO를 요약한다(추가 지시문 불필요).

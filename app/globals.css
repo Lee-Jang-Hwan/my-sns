@@ -123,3 +123,22 @@
     @apply max-w-7xl mx-auto pt-16 px-4;
   }
 }
+
+@keyframes doubleTapHeart {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  10% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  80% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
