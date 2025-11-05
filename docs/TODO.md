@@ -105,9 +105,9 @@
 
 #### 2-5. 댓글 기능 - 삭제
 
-- [ ] `/api/comments/[commentId]` DELETE API
-- [ ] 댓글 삭제 버튼 (본인만 표시)
-- [ ] 댓글 삭제 확인 (선택)
+- [x] `/api/comments/[commentId]` DELETE API
+- [x] 댓글 삭제 버튼 (본인만 표시)
+- [x] 댓글 삭제 확인 (선택)
 
 ### 3. 프로필 페이지 & 팔로우 기능
 
