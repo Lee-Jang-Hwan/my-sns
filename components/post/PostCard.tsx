@@ -11,6 +11,21 @@ import {
   Bookmark,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 /**
  * @file PostCard.tsx
@@ -41,8 +56,10 @@ interface PostCardProps {
   profileImage?: string; // 프로필 이미지 URL (선택)
   username: string; // 사용자명
   timeAgo: string; // 상대 시간 (예: "3시간 전")
-  onMenuClick?: () => void; // 메뉴 클릭 핸들러 (선택)
+  onMenuClick?: () => void; // 메뉴 클릭 핸들러 (선택, 레거시)
   userId?: string; // 사용자 ID (프로필 링크용)
+  isOwnPost?: boolean; // 본인 게시물 여부
+  onDeleteClick?: () => void; // 삭제 클릭 핸들러 (선택)
   // Image props
   imageUrl?: string; // 게시물 이미지 URL (선택)
   postId?: string; // 게시물 ID (이미지 클릭 시 상세 페이지 링크용)
@@ -65,6 +82,8 @@ export default function PostCard({
   timeAgo,
   onMenuClick,
   userId,
+  isOwnPost = false,
+  onDeleteClick,
   imageUrl,
   postId,
   isLiked = false,
@@ -82,6 +101,7 @@ export default function PostCard({
   const [isAnimating, setIsAnimating] = useState(false);
   const [showFullCaption, setShowFullCaption] = useState(false);
   const [showDoubleTapHeart, setShowDoubleTapHeart] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
   // isLiked, likeCount prop 변경 시 state 동기화
   useEffect(() => {
@@ -263,14 +283,37 @@ export default function PostCard({
         </div>
 
         {/* 메뉴 버튼 */}
-        <button
-          type="button"
-          onClick={onMenuClick}
-          className="flex-shrink-0 p-2 -mr-2 hover:opacity-70 transition-opacity"
-          aria-label="더보기 메뉴"
-        >
-          <MoreHorizontal className="w-5 h-5 text-[#262626]" />
-        </button>
+        {(isOwnPost || onMenuClick) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex-shrink-0 p-2 -mr-2 hover:opacity-70 transition-opacity focus:outline-none"
+                aria-label="더보기 메뉴"
+              >
+                <MoreHorizontal className="w-5 h-5 text-[#262626]" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              {isOwnPost && onDeleteClick && (
+                <DropdownMenuItem
+                  onClick={() => setIsDeleteDialogOpen(true)}
+                  className="text-[#ed4956] focus:text-[#ed4956] cursor-pointer"
+                >
+                  삭제
+                </DropdownMenuItem>
+              )}
+              {onMenuClick && (
+                <DropdownMenuItem
+                  onClick={onMenuClick}
+                  className="cursor-pointer"
+                >
+                  기타 옵션
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </header>
 
       {/* Image 영역 (1:1 정사각형) */}
@@ -427,6 +470,39 @@ export default function PostCard({
           </div>
         )}
       </div>
+
+      {/* 게시물 삭제 확인 다이얼로그 */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-center">
+              게시물을 삭제하시겠어요?
+            </DialogTitle>
+            <DialogDescription className="text-center">
+              이 게시물을 삭제하면 복구할 수 없습니다.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="sm:justify-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setIsDeleteDialogOpen(false)}
+              className="flex-1 sm:flex-none"
+            >
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                onDeleteClick?.();
+                setIsDeleteDialogOpen(false);
+              }}
+              className="flex-1 sm:flex-none"
+            >
+              삭제
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </article>
   );
 }
