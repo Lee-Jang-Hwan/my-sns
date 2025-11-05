@@ -4,9 +4,16 @@ import { getServiceRoleClient } from '@/lib/supabase/service-role';
 
 /**
  * @file route.ts
- * @description 게시물 삭제 API
+ * @description 게시물 상세 조회 및 삭제 API
  *
- * 주요 기능:
+ * GET 주요 기능:
+ * 1. 단일 게시물 상세 정보 조회
+ * 2. 작성자 정보 (users JOIN)
+ * 3. 좋아요 수 및 현재 사용자 좋아요 여부
+ * 4. 댓글 전체 목록 (시간 역순)
+ * 5. 댓글 총 개수
+ *
+ * DELETE 주요 기능:
  * 1. 게시물 삭제 (본인 게시물만)
  * 2. Storage에서 이미지 파일 삭제
  * 3. 본인 게시물 검증
@@ -16,8 +23,193 @@ import { getServiceRoleClient } from '@/lib/supabase/service-role';
  * - @/lib/supabase/service-role: Supabase 클라이언트
  */
 
-interface DeletePostParams {
+interface PostParams {
   postId: string;
+}
+
+interface PostRow {
+  id: string;
+  user_id: string;
+  image_url: string | null;
+  caption: string | null;
+  created_at: string;
+  user: {
+    id: string;
+    name: string;
+  } | null;
+}
+
+interface CommentRow {
+  id: string;
+  post_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  user: {
+    id: string;
+    name: string;
+  } | null;
+}
+
+/**
+ * GET: 게시물 상세 조회
+ */
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<PostParams> }
+) {
+  try {
+    // 경로 파라미터 추출 (Next.js 15)
+    const { postId } = await params;
+
+    if (!postId || typeof postId !== 'string') {
+      return NextResponse.json(
+        { error: 'Bad Request', details: 'postId is required' },
+        { status: 400 }
+      );
+    }
+
+    // Supabase 클라이언트
+    const supabase = getServiceRoleClient();
+
+    // 현재 Clerk 사용자 확인 (좋아요 여부 확인용, 선택적)
+    const { userId: clerkUserId } = await auth();
+    let currentUserId: string | null = null;
+
+    if (clerkUserId) {
+      // Clerk user_id를 Supabase users 테이블의 id로 변환
+      const { data: userData } = await supabase
+        .from('users')
+        .select('id')
+        .eq('clerk_id', clerkUserId)
+        .single();
+
+      if (userData) {
+        currentUserId = userData.id;
+      }
+    }
+
+    // 1. 게시물 조회 (users JOIN)
+    const { data: postData, error: postError } = await supabase
+      .from('posts')
+      .select(
+        `
+        id,
+        user_id,
+        image_url,
+        caption,
+        created_at,
+        users!posts_user_id_fkey (
+          id,
+          name
+        )
+      `
+      )
+      .eq('id', postId)
+      .single();
+
+    if (postError) {
+      if (postError.code === 'PGRST116') {
+        // 게시물이 존재하지 않음
+        return NextResponse.json(
+          { error: 'Not Found', details: 'Post not found' },
+          { status: 404 }
+        );
+      }
+      console.error('Post query error:', postError);
+      return NextResponse.json(
+        { error: 'Internal server error', details: postError.message },
+        { status: 500 }
+      );
+    }
+
+    if (!postData) {
+      return NextResponse.json(
+        { error: 'Not Found', details: 'Post not found' },
+        { status: 404 }
+      );
+    }
+
+    // 2. 좋아요 수 집계 및 현재 사용자 좋아요 여부 확인
+    const { data: likesData, error: likesError } = await supabase
+      .from('likes')
+      .select('user_id')
+      .eq('post_id', postId);
+
+    if (likesError) {
+      console.error('Likes query error:', likesError);
+    }
+
+    const likeCount = likesData?.length || 0;
+    const isLiked =
+      currentUserId !== null &&
+      likesData?.some((like) => like.user_id === currentUserId) === true;
+
+    // 3. 댓글 전체 목록 조회 (시간 역순)
+    const { data: commentsData, error: commentsError } = await supabase
+      .from('comments')
+      .select(
+        `
+        id,
+        post_id,
+        user_id,
+        content,
+        created_at,
+        users!comments_user_id_fkey (
+          id,
+          name
+        )
+      `
+      )
+      .eq('post_id', postId)
+      .order('created_at', { ascending: false });
+
+    if (commentsError) {
+      console.error('Comments query error:', commentsError);
+    }
+
+    // 댓글 데이터 포맷팅
+    const formattedComments =
+      commentsData?.map((comment: CommentRow) => ({
+        id: comment.id,
+        username: comment.user?.name || '알 수 없음',
+        content: comment.content,
+        userId: comment.user_id,
+        created_at: comment.created_at,
+      })) || [];
+
+    // 응답 데이터 변환
+    const post: PostRow = postData as PostRow;
+    const response = {
+      id: post.id,
+      user_id: post.user_id,
+      image_url: post.image_url || undefined,
+      caption: post.caption || undefined,
+      created_at: post.created_at,
+      user: post.user
+        ? {
+            id: post.user.id,
+            name: post.user.name,
+            profile_image_url: undefined, // users 테이블에 profile_image_url 컬럼 없음
+          }
+        : undefined,
+      like_count: likeCount,
+      is_liked: isLiked,
+      comments: formattedComments,
+      total_comments: formattedComments.length,
+    };
+
+    return NextResponse.json(response);
+  } catch (error) {
+    console.error('GET /api/posts/[postId] error:', error);
+    return NextResponse.json(
+      {
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 }
+    );
+  }
 }
 
 /**
@@ -25,7 +217,7 @@ interface DeletePostParams {
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<DeletePostParams> }
+  { params }: { params: Promise<PostParams> }
 ) {
   try {
     // Clerk 인증 확인

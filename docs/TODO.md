@@ -141,12 +141,12 @@
 
 #### 3-4. 게시물 상세 모달/페이지
 
-- [ ] PostModal 컴포넌트 (Desktop)
-- [ ] `/post/[postId]` 페이지 (Mobile)
-- [ ] 이미지 + 댓글 목록 레이아웃
-- [ ] 댓글 스크롤 가능 영역
-- [ ] `/api/posts/[postId]` GET API
-- [ ] 게시물 상세 정보 조회
+- [x] PostModal 컴포넌트 (Desktop)
+- [x] `/post/[postId]` 페이지 (Mobile)
+- [x] 이미지 + 댓글 목록 레이아웃
+- [x] 댓글 스크롤 가능 영역
+- [x] `/api/posts/[postId]` GET API
+- [x] 게시물 상세 정보 조회
 
 ### 4. 최종 마무리 & 배포
 
