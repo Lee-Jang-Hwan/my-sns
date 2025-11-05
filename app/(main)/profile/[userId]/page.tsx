@@ -16,6 +16,7 @@
  * - @/components/profile/ProfileStats: 프로필 통계 컴포넌트 (게시물, 팔로워, 팔로잉)
  * - @/components/profile/FollowButton: 팔로우/팔로잉 버튼 컴포넌트
  * - @/components/profile/EditProfileButton: 프로필 편집 버튼 컴포넌트
+ * - @/components/profile/PostGrid: 게시물 그리드 컴포넌트
  */
 
 import { auth } from '@clerk/nextjs/server';
@@ -25,6 +26,7 @@ import ProfileHeader from '@/components/profile/ProfileHeader';
 import ProfileStats from '@/components/profile/ProfileStats';
 import FollowButton from '@/components/profile/FollowButton';
 import EditProfileButton from '@/components/profile/EditProfileButton';
+import PostGrid from '@/components/profile/PostGrid';
 
 interface UserStats {
   user_id: string;
@@ -196,6 +198,11 @@ export default async function ProfilePage({ params }: PageProps) {
               <p>Clerk ID: {userStats.clerk_id}</p>
             </div>
           </div>
+        </div>
+
+        {/* 게시물 그리드 */}
+        <div className="mt-8">
+          <PostGrid userId={userStats.user_id} />
         </div>
       </div>
     </div>
