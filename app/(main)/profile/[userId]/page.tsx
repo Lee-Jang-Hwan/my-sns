@@ -187,6 +187,7 @@ export default async function ProfilePage({ params }: PageProps) {
                   <FollowButton
                     targetUserId={userStats.user_id}
                     initialIsFollowing={isFollowing}
+                    currentUserId={currentUserId}
                   />
                 </div>
               )

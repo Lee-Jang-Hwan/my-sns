@@ -31,6 +31,11 @@ interface FollowButtonProps {
    */
   initialIsFollowing?: boolean;
   /**
+   * 현재 사용자 ID (Supabase UUID, 선택적)
+   * 자기 자신 팔로우 방지 검증에 사용
+   */
+  currentUserId?: string;
+  /**
    * 추가 클래스명 (선택적)
    */
   className?: string;
@@ -39,6 +44,7 @@ interface FollowButtonProps {
 export default function FollowButton({
   targetUserId,
   initialIsFollowing = false,
+  currentUserId,
   className,
 }: FollowButtonProps) {
   const [isFollowing, setIsFollowing] = useState(initialIsFollowing);
@@ -47,6 +53,12 @@ export default function FollowButton({
 
   const handleFollowToggle = async () => {
     if (isLoading) return;
+
+    // 자기 자신 팔로우 방지 검증 (컴포넌트 레벨)
+    if (currentUserId && currentUserId === targetUserId) {
+      alert('자기 자신을 팔로우할 수 없습니다.');
+      return;
+    }
 
     setIsLoading(true);
 
