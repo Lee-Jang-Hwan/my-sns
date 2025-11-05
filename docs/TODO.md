@@ -98,9 +98,9 @@
 #### 2-4. 댓글 기능 - UI & 작성
 
 - [x] `comments` 테이블 생성
-- [ ] CommentList 컴포넌트
-- [ ] CommentForm 컴포넌트
-- [ ] `/api/comments` POST API
+- [x] CommentList 컴포넌트
+- [x] CommentForm 컴포넌트
+- [x] `/api/comments` POST API
 - [x] PostCard 댓글 미리보기 (최신 2개) - 이미 구현됨
 
 #### 2-5. 댓글 기능 - 삭제
