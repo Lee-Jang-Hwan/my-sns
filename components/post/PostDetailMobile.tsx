@@ -88,18 +88,32 @@ export default function PostDetailMobile({
   const router = useRouter();
   const { userId: clerkUserId } = useAuth();
   const supabase = useClerkSupabaseClient();
+  
+  // 디버깅 로그
+  useEffect(() => {
+    console.log('PostDetailMobile: Component mounted', {
+      postId,
+      hasInitialData: !!initialPostData,
+      hasUser: !!initialPostData?.user,
+      userName: initialPostData?.user?.name,
+      commentsCount: initialPostData?.comments?.length || 0,
+      likeCount: initialPostData?.like_count,
+    });
+  }, [initialPostData, postId]);
+
   const [postData, setPostData] = useState<PostData>(initialPostData);
-  const [liked, setLiked] = useState(initialPostData.is_liked);
-  const [likeCount, setLikeCount] = useState(initialPostData.like_count);
+  const [liked, setLiked] = useState(initialPostData?.is_liked || false);
+  const [likeCount, setLikeCount] = useState(initialPostData?.like_count || 0);
   const [isAnimating, setIsAnimating] = useState(false);
   const [showDoubleTapHeart, setShowDoubleTapHeart] = useState(false);
   const [comments, setComments] = useState<Comment[]>(
-    initialPostData.comments || []
+    initialPostData?.comments || []
   );
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
   // 현재 사용자 ID 조회 (clerk_id로 Supabase users 테이블에서 조회)
+  // React Hook 규칙: 모든 hook은 조건부 return 전에 호출되어야 함
   useEffect(() => {
     if (!clerkUserId) {
       setCurrentUserId(null);
@@ -129,6 +143,19 @@ export default function PostDetailMobile({
 
     fetchCurrentUserId();
   }, [clerkUserId, supabase]);
+
+  // initialPostData가 없으면 에러 표시 (모든 hook 호출 후)
+  if (!initialPostData) {
+    console.error('PostDetailMobile: initialPostData is undefined');
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] px-4">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">오류</h1>
+          <p className="text-gray-600">게시물 데이터를 불러올 수 없습니다.</p>
+        </div>
+      </div>
+    );
+  }
 
   // 좋아요 클릭 핸들러
   const handleLikeClick = async () => {
@@ -169,7 +196,7 @@ export default function PostDetailMobile({
 
   // 더블탭 좋아요 핸들러 (Mobile)
   const handleDoubleClick = async () => {
-    if (!postId || !postData.image_url) return;
+    if (!postId || !postData?.image_url) return;
 
     // 이미 좋아요한 경우 더블탭 시 좋아요 취소하지 않음 (Instagram 동작)
     if (liked) return;
@@ -281,17 +308,28 @@ export default function PostDetailMobile({
   };
 
   const isOwnPost =
-    postData && currentUserId && postData.user_id === currentUserId;
+    postData && currentUserId && postData?.user_id === currentUserId;
+
+  // 디버깅: 렌더링 전 데이터 확인
+  console.log('PostDetailMobile: Rendering', {
+    hasPostData: !!postData,
+    postId,
+    imageUrl: postData?.image_url,
+    userName: postData?.user?.name,
+    commentsLength: comments.length,
+    likeCount,
+    isLiked: liked,
+  });
 
   return (
-    <div className="w-full bg-white md:hidden">
+    <div className="w-full bg-white min-h-screen">
       {/* 이미지 영역 (전체 너비, 정사각형) */}
       <div className="relative w-full aspect-square bg-black">
-        {postData.image_url ? (
+        {postData?.image_url ? (
           <>
             <Image
-              src={postData.image_url}
-              alt={postData.caption || '게시물 이미지'}
+              src={postData?.image_url || ''}
+              alt={postData?.caption || '게시물 이미지'}
               fill
               className="object-cover"
               priority
@@ -299,7 +337,7 @@ export default function PostDetailMobile({
             />
             {/* 더블탭 좋아요 애니메이션 */}
             {showDoubleTapHeart && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
                 <Heart className="w-24 h-24 text-white fill-white animate-ping" />
               </div>
             )}
@@ -328,11 +366,11 @@ export default function PostDetailMobile({
           {/* 프로필 이미지 */}
           <Link
             href={
-              postData.user_id ? `/profile/${postData.user_id}` : '/profile'
+              postData?.user_id ? `/profile/${postData.user_id}` : '/profile'
             }
             className="flex-shrink-0"
           >
-            {postData.user?.profile_image_url ? (
+            {postData?.user?.profile_image_url ? (
               <Image
                 src={postData.user.profile_image_url}
                 alt={`${postData.user.name} 프로필`}
@@ -343,7 +381,7 @@ export default function PostDetailMobile({
             ) : (
               <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
                 <span className="text-xs text-gray-500 font-semibold">
-                  {postData.user?.name?.charAt(0).toUpperCase() || 'U'}
+                  {(postData?.user?.name || '알 수 없음').charAt(0).toUpperCase()}
                 </span>
               </div>
             )}
@@ -353,16 +391,16 @@ export default function PostDetailMobile({
           <div className="flex-1 flex flex-col justify-center min-w-0 ml-3">
             <Link
               href={
-                postData.user_id ? `/profile/${postData.user_id}` : '/profile'
+                postData?.user_id ? `/profile/${postData.user_id}` : '/profile'
               }
               className="hover:opacity-70 transition-opacity"
             >
               <span className="text-sm font-bold text-[#262626]">
-                {postData.user?.name || '알 수 없음'}
+                {postData?.user?.name || '알 수 없음'}
               </span>
             </Link>
             <span className="text-xs text-[#8e8e8e]">
-              {formatTimeAgo(postData.created_at)}
+              {postData?.created_at ? formatTimeAgo(postData.created_at) : ''}
             </span>
           </div>
 
@@ -435,25 +473,30 @@ export default function PostDetailMobile({
             </button>
           </div>
 
-          {/* 좋아요 수 */}
-          {likeCount > 0 && (
-            <div className="text-sm font-bold text-[#262626]">
-              좋아요 {likeCount.toLocaleString()}개
+          {/* 좋아요 수 및 댓글 수 */}
+          {(likeCount > 0 || (postData?.total_comments ?? 0) > 0) && (
+            <div className="flex items-center gap-4 text-sm font-bold text-[#262626]">
+              {likeCount > 0 && (
+                <span>좋아요 {likeCount.toLocaleString()}개</span>
+              )}
+              {(postData?.total_comments ?? 0) > 0 && (
+                <span>댓글 {(postData?.total_comments ?? 0).toLocaleString()}개</span>
+              )}
             </div>
           )}
 
           {/* 캡션 */}
-          {postData.caption && (
+          {postData?.caption && (
             <div className="text-sm text-[#262626]">
               <Link
                 href={
-                  postData.user_id ? `/profile/${postData.user_id}` : '/profile'
+                  postData?.user_id ? `/profile/${postData.user_id}` : '/profile'
                 }
                 className="font-bold hover:opacity-70 transition-opacity mr-1"
               >
-                {postData.user?.name || '알 수 없음'}
+                {postData?.user?.name || '알 수 없음'}
               </Link>
-              <span>{postData.caption}</span>
+              <span>{postData?.caption}</span>
             </div>
           )}
         </div>

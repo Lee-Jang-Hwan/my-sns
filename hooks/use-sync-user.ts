@@ -24,6 +24,8 @@ import { useEffect, useRef } from "react";
 export function useSyncUser() {
   const { isLoaded, userId } = useAuth();
   const syncedRef = useRef(false);
+  const retryCountRef = useRef(0);
+  const maxRetries = 3;
 
   useEffect(() => {
     // 이미 동기화했거나, 로딩 중이거나, 로그인하지 않은 경우 무시
@@ -32,23 +34,50 @@ export function useSyncUser() {
     }
 
     // 동기화 실행
-    const syncUser = async () => {
+    const syncUser = async (retryCount = 0) => {
       try {
         const response = await fetch("/api/sync-user", {
           method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
         });
 
         if (!response.ok) {
-          console.error("Failed to sync user:", await response.text());
+          const errorText = await response.text();
+          console.error("Failed to sync user:", errorText);
+          
+          // 재시도 로직 (최대 3회)
+          if (retryCount < maxRetries) {
+            retryCountRef.current = retryCount + 1;
+            setTimeout(() => {
+              syncUser(retryCount + 1);
+            }, 1000 * (retryCount + 1)); // 지수 백오프
+            return;
+          }
+          
           return;
         }
 
-        syncedRef.current = true;
+        const result = await response.json();
+        if (result.success) {
+          syncedRef.current = true;
+          retryCountRef.current = 0;
+          console.log("User synced successfully:", result.user);
+        }
       } catch (error) {
         console.error("Error syncing user:", error);
+        
+        // 네트워크 에러 등 재시도 가능한 경우 재시도
+        if (retryCount < maxRetries) {
+          retryCountRef.current = retryCount + 1;
+          setTimeout(() => {
+            syncUser(retryCount + 1);
+          }, 1000 * (retryCount + 1));
+        }
       }
     };
 
-    syncUser();
+    syncUser(0);
   }, [isLoaded, userId]);
 }

@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Search, PlusSquare, Heart, UserCircle } from 'lucide-react';
+import { SignedIn, SignedOut } from '@clerk/nextjs';
+import { Home, Search, PlusSquare, Heart, UserCircle, LogIn } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /**
@@ -61,34 +62,52 @@ export default function BottomNav() {
         'px-4'
       )}
     >
-      {menuItems.map((item) => {
-        const Icon = item.icon;
-        const active = isActive(item.href);
+      <SignedIn>
+        {menuItems.map((item) => {
+          const Icon = item.icon;
+          const active = isActive(item.href);
 
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={cn(
-              'flex items-center justify-center',
-              'w-full h-full',
-              'text-[#262626]',
-              'transition-colors duration-150',
-              // Active 상태
-              active && 'text-[#262626]'
-            )}
-            aria-label={item.label}
-          >
-            <Icon
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
               className={cn(
-                'w-6 h-6',
-                'flex-shrink-0',
-                active ? 'text-[#262626]' : 'text-[#262626]'
+                'flex items-center justify-center',
+                'w-full h-full',
+                'text-[#262626]',
+                'transition-colors duration-150',
+                // Active 상태
+                active && 'text-[#262626]'
               )}
-            />
-          </Link>
-        );
-      })}
+              aria-label={item.label}
+            >
+              <Icon
+                className={cn(
+                  'w-6 h-6',
+                  'flex-shrink-0',
+                  active ? 'text-[#262626]' : 'text-[#262626]'
+                )}
+              />
+            </Link>
+          );
+        })}
+      </SignedIn>
+
+      <SignedOut>
+        {/* 로그인하지 않은 사용자: 로그인 버튼만 표시 */}
+        <Link
+          href="/sign-in"
+          className={cn(
+            'flex items-center justify-center',
+            'w-full h-full',
+            'text-[#0095f6]',
+            'transition-colors duration-150'
+          )}
+          aria-label="로그인"
+        >
+          <LogIn className="w-6 h-6 flex-shrink-0" />
+        </Link>
+      </SignedOut>
     </nav>
   );
 }

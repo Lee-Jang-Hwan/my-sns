@@ -27,19 +27,7 @@ interface PostParams {
   postId: string;
 }
 
-interface PostRow {
-  id: string;
-  user_id: string;
-  image_url: string | null;
-  caption: string | null;
-  created_at: string;
-  user: {
-    id: string;
-    name: string;
-  } | null;
-}
-
-interface CommentRow {
+interface CommentWithUser {
   id: string;
   post_id: string;
   user_id: string;
@@ -89,22 +77,10 @@ export async function GET(
       }
     }
 
-    // 1. 게시물 조회 (users JOIN)
+    // 1. 게시물 조회
     const { data: postData, error: postError } = await supabase
       .from('posts')
-      .select(
-        `
-        id,
-        user_id,
-        image_url,
-        caption,
-        created_at,
-        users!posts_user_id_fkey (
-          id,
-          name
-        )
-      `
-      )
+      .select('id, user_id, image_url, caption, created_at')
       .eq('id', postId)
       .single();
 
@@ -130,7 +106,18 @@ export async function GET(
       );
     }
 
-    // 2. 좋아요 수 집계 및 현재 사용자 좋아요 여부 확인
+    // 2. 사용자 정보 조회
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('id, name, profile_image_url')
+      .eq('id', postData.user_id)
+      .single();
+
+    if (userError) {
+      console.error('User query error:', userError);
+    }
+
+    // 3. 좋아요 수 집계 및 현재 사용자 좋아요 여부 확인
     const { data: likesData, error: likesError } = await supabase
       .from('likes')
       .select('user_id')
@@ -145,22 +132,10 @@ export async function GET(
       currentUserId !== null &&
       likesData?.some((like) => like.user_id === currentUserId) === true;
 
-    // 3. 댓글 전체 목록 조회 (시간 역순)
+    // 4. 댓글 전체 목록 조회 (시간 역순)
     const { data: commentsData, error: commentsError } = await supabase
       .from('comments')
-      .select(
-        `
-        id,
-        post_id,
-        user_id,
-        content,
-        created_at,
-        users!comments_user_id_fkey (
-          id,
-          name
-        )
-      `
-      )
+      .select('id, post_id, user_id, content, created_at')
       .eq('post_id', postId)
       .order('created_at', { ascending: false });
 
@@ -168,29 +143,40 @@ export async function GET(
       console.error('Comments query error:', commentsError);
     }
 
+    // 댓글 작성자 정보 조회
+    const commentUserIds = commentsData?.map((c) => c.user_id) || [];
+    const { data: commentUsersData } = await supabase
+      .from('users')
+      .select('id, name')
+      .in('id', commentUserIds);
+
+    const commentUsersMap = new Map<string, { id: string; name: string }>();
+    commentUsersData?.forEach((user) => {
+      commentUsersMap.set(user.id, { id: user.id, name: user.name });
+    });
+
     // 댓글 데이터 포맷팅
     const formattedComments =
-      commentsData?.map((comment: CommentRow) => ({
+      commentsData?.map((comment) => ({
         id: comment.id,
-        username: comment.user?.name || '알 수 없음',
+        username: commentUsersMap.get(comment.user_id)?.name || '알 수 없음',
         content: comment.content,
         userId: comment.user_id,
         created_at: comment.created_at,
       })) || [];
 
     // 응답 데이터 변환
-    const post: PostRow = postData as PostRow;
     const response = {
-      id: post.id,
-      user_id: post.user_id,
-      image_url: post.image_url || undefined,
-      caption: post.caption || undefined,
-      created_at: post.created_at,
-      user: post.user
+      id: postData.id,
+      user_id: postData.user_id,
+      image_url: postData.image_url || undefined,
+      caption: postData.caption || undefined,
+      created_at: postData.created_at,
+      user: userData
         ? {
-            id: post.user.id,
-            name: post.user.name,
-            profile_image_url: undefined, // users 테이블에 profile_image_url 컬럼 없음
+            id: userData.id,
+            name: userData.name,
+            profile_image_url: userData.profile_image_url || undefined,
           }
         : undefined,
       like_count: likeCount,

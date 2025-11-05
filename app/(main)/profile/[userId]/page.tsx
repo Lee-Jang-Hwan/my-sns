@@ -10,7 +10,7 @@
  * 5. 프로필 편집 버튼 표시 (자기 자신일 때만)
  *
  * @dependencies
- * - /api/users/[userId]: 사용자 정보 조회 API
+ * - @/lib/supabase/service-role: Supabase 서비스 역할 클라이언트
  * - @/components/profile/ProfileAvatar: 프로필 아바타 컴포넌트
  * - @/components/profile/ProfileHeader: 프로필 헤더 컴포넌트 (사용자명, 이름)
  * - @/components/profile/ProfileStats: 프로필 통계 컴포넌트 (게시물, 팔로워, 팔로잉)
@@ -19,7 +19,7 @@
  * - @/components/profile/PostGrid: 게시물 그리드 컴포넌트
  */
 
-import { auth } from '@clerk/nextjs/server';
+import { auth, clerkClient } from '@clerk/nextjs/server';
 import { getServiceRoleClient } from '@/lib/supabase/service-role';
 import ProfileAvatar from '@/components/profile/ProfileAvatar';
 import ProfileHeader from '@/components/profile/ProfileHeader';
@@ -41,20 +41,116 @@ interface PageProps {
   params: Promise<{ userId: string }>;
 }
 
+/**
+ * Supabase에서 직접 사용자 프로필 조회
+ */
 async function fetchUserProfile(userId: string): Promise<UserStats> {
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-  const response = await fetch(`${baseUrl}/api/users/${userId}`, {
-    cache: 'no-store', // 서버 사이드에서 항상 최신 데이터 조회
-  });
+  const supabase = getServiceRoleClient();
 
-  if (!response.ok) {
-    if (response.status === 404) {
+  // userId가 UUID 형식인지 확인
+  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    userId
+  );
+
+  let userStatsQuery;
+
+  if (isUUID) {
+    // UUID로 조회 (Supabase user_id)
+    userStatsQuery = supabase
+      .from('user_stats')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+  } else {
+    // clerk_id로 조회
+    userStatsQuery = supabase
+      .from('user_stats')
+      .select('*')
+      .eq('clerk_id', userId)
+      .single();
+  }
+
+  const { data: initialUserStats, error: userStatsError } = await userStatsQuery;
+  let userStats = initialUserStats;
+
+  // user_stats 뷰에서 사용자를 찾을 수 없는 경우, users 테이블에서 직접 확인
+  if (userStatsError && userStatsError.code === 'PGRST116') {
+    console.log('User not found in user_stats view, checking users table...', {
+      userId,
+      isUUID,
+    });
+
+    // users 테이블에서 직접 조회 시도
+    let userQuery;
+    if (isUUID) {
+      userQuery = supabase
+        .from('users')
+        .select('id, clerk_id, name, profile_image_url')
+        .eq('id', userId)
+        .single();
+    } else {
+      userQuery = supabase
+        .from('users')
+        .select('id, clerk_id, name, profile_image_url')
+        .eq('clerk_id', userId)
+        .single();
+    }
+
+    const { data: userData, error: userError } = await userQuery;
+
+    if (userError || !userData) {
+      // users 테이블에도 없으면 에러
+      console.error('User not found in users table:', {
+        userId,
+        isUUID,
+        error: userError,
+      });
       throw new Error('사용자를 찾을 수 없습니다.');
     }
+
+    // users 테이블에는 있지만 user_stats 뷰에 없는 경우 (통계 직접 계산)
+    const { count: postsCount } = await supabase
+      .from('posts')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userData.id);
+
+    const { count: followersCount } = await supabase
+      .from('follows')
+      .select('id', { count: 'exact', head: true })
+      .eq('following_id', userData.id);
+
+    const { count: followingCount } = await supabase
+      .from('follows')
+      .select('id', { count: 'exact', head: true })
+      .eq('follower_id', userData.id);
+
+    userStats = {
+      user_id: userData.id,
+      clerk_id: userData.clerk_id,
+      name: userData.name,
+      profile_image_url: userData.profile_image_url,
+      posts_count: postsCount || 0,
+      followers_count: followersCount || 0,
+      following_count: followingCount || 0,
+    };
+  } else if (userStatsError) {
+    // 다른 에러인 경우
+    console.error('User stats query error:', userStatsError);
     throw new Error('사용자 정보를 불러오는데 실패했습니다.');
   }
 
-  return response.json();
+  if (!userStats) {
+    throw new Error('사용자를 찾을 수 없습니다.');
+  }
+
+  return {
+    user_id: userStats.user_id,
+    clerk_id: userStats.clerk_id,
+    name: userStats.name,
+    posts_count: Number(userStats.posts_count) || 0,
+    followers_count: Number(userStats.followers_count) || 0,
+    following_count: Number(userStats.following_count) || 0,
+  };
 }
 
 /**
@@ -125,11 +221,47 @@ export default async function ProfilePage({ params }: PageProps) {
   if (currentClerkUserId) {
     try {
       const supabase = getServiceRoleClient();
-      const { data: currentUserData } = await supabase
+      const { data: initialCurrentUserData, error: currentUserError } = await supabase
         .from('users')
         .select('id')
         .eq('clerk_id', currentClerkUserId)
         .single();
+      let currentUserData = initialCurrentUserData;
+
+      // 사용자를 찾을 수 없는 경우 동기화 시도
+      if (currentUserError || !currentUserData) {
+        console.log('Current user not found, attempting to sync...');
+        try {
+          const client = await clerkClient();
+          const clerkUser = await client.users.getUser(currentClerkUserId);
+
+          if (clerkUser) {
+            const { data: syncedUser } = await supabase
+              .from('users')
+              .upsert(
+                {
+                  clerk_id: clerkUser.id,
+                  name:
+                    clerkUser.fullName ||
+                    clerkUser.username ||
+                    clerkUser.emailAddresses[0]?.emailAddress ||
+                    'Unknown',
+                },
+                {
+                  onConflict: 'clerk_id',
+                }
+              )
+              .select()
+              .single();
+
+            if (syncedUser) {
+              currentUserData = { id: syncedUser.id };
+            }
+          }
+        } catch (syncErr) {
+          console.error('Failed to sync current user:', syncErr);
+        }
+      }
 
       if (currentUserData) {
         currentUserId = currentUserData.id;

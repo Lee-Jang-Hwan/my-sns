@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceRoleClient } from '@/lib/supabase/service-role';
+import { auth, clerkClient } from '@clerk/nextjs/server';
 
 /**
  * @file route.ts
@@ -63,19 +64,145 @@ export async function GET(
         .single();
     }
 
-    const { data: userStats, error: userStatsError } = await userStatsQuery;
+    let { data: userStats, error: userStatsError } = await userStatsQuery;
 
-    if (userStatsError) {
-      console.error('User stats query error:', userStatsError);
-
-      // 사용자를 찾을 수 없는 경우
-      if (userStatsError.code === 'PGRST116') {
-        return NextResponse.json(
-          { error: '사용자를 찾을 수 없습니다.' },
-          { status: 404 }
-        );
+    // user_stats 뷰에서 사용자를 찾을 수 없는 경우, users 테이블에서 직접 확인
+    if (userStatsError && userStatsError.code === 'PGRST116') {
+      console.log('User not found in user_stats view, checking users table...');
+      
+      // users 테이블에서 직접 조회 시도
+      let userQuery;
+      if (isUUID) {
+        userQuery = supabase
+          .from('users')
+          .select('id, clerk_id, name, profile_image_url')
+          .eq('id', userId)
+          .single();
+      } else {
+        userQuery = supabase
+          .from('users')
+          .select('id, clerk_id, name, profile_image_url')
+          .eq('clerk_id', userId)
+          .single();
       }
 
+      const { data: userData, error: userError } = await userQuery;
+
+      if (userError || !userData) {
+        // users 테이블에도 없으면 동기화 시도 (clerk_id인 경우만)
+        if (!isUUID) {
+          try {
+            const { userId: currentClerkUserId } = await auth();
+            // 현재 로그인한 사용자이고, 조회하려는 사용자가 자신인 경우에만 동기화 시도
+            if (currentClerkUserId === userId) {
+              const client = await clerkClient();
+              const clerkUser = await client.users.getUser(userId);
+
+              if (clerkUser) {
+                const { data: syncedUser } = await supabase
+                  .from('users')
+                  .upsert(
+                    {
+                      clerk_id: clerkUser.id,
+                      name:
+                        clerkUser.fullName ||
+                        clerkUser.username ||
+                        clerkUser.emailAddresses[0]?.emailAddress ||
+                        'Unknown',
+                    },
+                    {
+                      onConflict: 'clerk_id',
+                    }
+                  )
+                  .select()
+                  .single();
+
+                if (syncedUser) {
+                  // 동기화 성공 후 user_stats 뷰에서 다시 조회
+                  const retryQuery = supabase
+                    .from('user_stats')
+                    .select('*')
+                    .eq('user_id', syncedUser.id)
+                    .single();
+
+                  const { data: retryStats } = await retryQuery;
+                  if (retryStats) {
+                    userStats = retryStats;
+                    userStatsError = null;
+                  } else {
+                    // 뷰에 아직 반영되지 않았으면 직접 통계 계산
+                    const { count: postsCount } = await supabase
+                      .from('posts')
+                      .select('id', { count: 'exact', head: true })
+                      .eq('user_id', syncedUser.id);
+
+                    const { count: followersCount } = await supabase
+                      .from('follows')
+                      .select('id', { count: 'exact', head: true })
+                      .eq('following_id', syncedUser.id);
+
+                    const { count: followingCount } = await supabase
+                      .from('follows')
+                      .select('id', { count: 'exact', head: true })
+                      .eq('follower_id', syncedUser.id);
+
+                    userStats = {
+                      user_id: syncedUser.id,
+                      clerk_id: syncedUser.clerk_id,
+                      name: syncedUser.name,
+                      profile_image_url: syncedUser.profile_image_url,
+                      posts_count: postsCount || 0,
+                      followers_count: followersCount || 0,
+                      following_count: followingCount || 0,
+                    };
+                    userStatsError = null;
+                  }
+                }
+              }
+            }
+          } catch (syncError) {
+            console.error('Failed to sync user in API:', syncError);
+          }
+        }
+
+        // 여전히 사용자를 찾을 수 없는 경우
+        if (!userStats) {
+          return NextResponse.json(
+            { error: '사용자를 찾을 수 없습니다.' },
+            { status: 404 }
+          );
+        }
+      } else {
+        // users 테이블에는 있지만 user_stats 뷰에 없는 경우 (통계 직접 계산)
+        const { count: postsCount } = await supabase
+          .from('posts')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', userData.id);
+
+        const { count: followersCount } = await supabase
+          .from('follows')
+          .select('id', { count: 'exact', head: true })
+          .eq('following_id', userData.id);
+
+        const { count: followingCount } = await supabase
+          .from('follows')
+          .select('id', { count: 'exact', head: true })
+          .eq('follower_id', userData.id);
+
+        userStats = {
+          user_id: userData.id,
+          clerk_id: userData.clerk_id,
+          name: userData.name,
+          profile_image_url: userData.profile_image_url,
+          posts_count: postsCount || 0,
+          followers_count: followersCount || 0,
+          following_count: followingCount || 0,
+        };
+        userStatsError = null;
+      }
+    } else if (userStatsError) {
+      // 다른 에러인 경우
+      console.error('User stats query error:', userStatsError);
       return NextResponse.json(
         {
           error: '사용자 정보를 불러오는데 실패했습니다.',

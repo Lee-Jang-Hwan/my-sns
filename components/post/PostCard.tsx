@@ -321,20 +321,51 @@ export default function PostCard({
         className="w-full aspect-square relative bg-gray-100 overflow-hidden cursor-pointer"
         onDoubleClick={handleDoubleClick}
       >
-        {imageUrl ? (
-          <Image
-            src={imageUrl}
-            alt={`${username}의 게시물`}
-            fill
-            className="object-cover select-none"
-            sizes="(max-width: 768px) 100vw, 630px"
-            priority={false}
-            draggable={false}
-          />
+        {postId ? (
+          <Link 
+            href={`/post/${postId}`} 
+            className="absolute inset-0 z-0"
+            onClick={(e) => {
+              // 더블탭 중이면 링크 이동 방지
+              if (showDoubleTapHeart) {
+                e.preventDefault();
+              }
+            }}
+          >
+            {imageUrl ? (
+              <Image
+                src={imageUrl}
+                alt={`${username}의 게시물`}
+                fill
+                className="object-cover select-none pointer-events-none"
+                sizes="(max-width: 768px) 100vw, 630px"
+                priority={false}
+                draggable={false}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-gray-100 pointer-events-none">
+                <span className="text-gray-400 text-sm">이미지 없음</span>
+              </div>
+            )}
+          </Link>
         ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gray-100">
-            <span className="text-gray-400 text-sm">이미지 없음</span>
-          </div>
+          <>
+            {imageUrl ? (
+              <Image
+                src={imageUrl}
+                alt={`${username}의 게시물`}
+                fill
+                className="object-cover select-none"
+                sizes="(max-width: 768px) 100vw, 630px"
+                priority={false}
+                draggable={false}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-gray-100">
+                <span className="text-gray-400 text-sm">이미지 없음</span>
+              </div>
+            )}
+          </>
         )}
 
         {/* 더블탭 큰 하트 애니메이션 */}
@@ -406,10 +437,15 @@ export default function PostCard({
 
       {/* Content 영역 */}
       <div className="px-4 pb-4 space-y-2">
-        {/* 좋아요 수 */}
-        {currentLikeCount > 0 && (
-          <div className="text-sm font-bold text-[#262626]">
-            좋아요 {currentLikeCount.toLocaleString()}개
+        {/* 좋아요 수 및 댓글 수 */}
+        {(currentLikeCount > 0 || (totalComments ?? comments.length) > 0) && (
+          <div className="flex items-center gap-4 text-sm font-bold text-[#262626]">
+            {currentLikeCount > 0 && (
+              <span>좋아요 {currentLikeCount.toLocaleString()}개</span>
+            )}
+            {(totalComments ?? comments.length) > 0 && (
+              <span>댓글 {(totalComments ?? comments.length).toLocaleString()}개</span>
+            )}
           </div>
         )}
 

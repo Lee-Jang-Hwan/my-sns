@@ -88,6 +88,21 @@ export default function PostFeed({ userId, initialPosts }: PostFeedProps) {
         }
 
         const data: ApiResponse = await response.json();
+        
+        // 디버깅: 사용자 정보 확인
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Posts fetched:', {
+            count: data.posts.length,
+            postsWithUser: data.posts.filter(p => p.user).length,
+            postsWithoutUser: data.posts.filter(p => !p.user).length,
+            samplePost: data.posts[0] ? {
+              id: data.posts[0].id,
+              userId: data.posts[0].user_id,
+              userName: data.posts[0].user?.name || '없음',
+            } : null,
+          });
+        }
+        
         return data;
       } catch (err) {
         console.error('Failed to fetch posts:', err);
@@ -104,15 +119,24 @@ export default function PostFeed({ userId, initialPosts }: PostFeedProps) {
       const loadInitialPosts = async () => {
         setLoading(true);
         setError(null);
-        const data = await fetchPosts(1, true);
+        try {
+          const data = await fetchPosts(1, true);
 
-        if (data) {
-          setPosts(data.posts);
-          setHasMore(data.hasMore);
-          setPage(1);
+          if (data) {
+            setPosts(data.posts);
+            setHasMore(data.hasMore);
+            setPage(1);
+          } else {
+            // 데이터가 없어도 에러 상태로 표시하지 않음 (빈 상태로 표시)
+            setPosts([]);
+            setHasMore(false);
+          }
+        } catch (err) {
+          console.error('Failed to load initial posts:', err);
+          setError(err instanceof Error ? err.message : '게시물을 불러오는데 실패했습니다.');
+        } finally {
+          setLoading(false);
         }
-
-        setLoading(false);
       };
 
       loadInitialPosts();
@@ -190,6 +214,14 @@ export default function PostFeed({ userId, initialPosts }: PostFeedProps) {
         userId: comment.userId,
       })) || [];
 
+    // 사용자 정보가 없는 경우 경고 로그
+    if (!post.user && process.env.NODE_ENV === 'development') {
+      console.warn('Post without user info:', {
+        postId: post.id,
+        userId: post.user_id,
+      });
+    }
+
     return {
       postId: post.id,
       userId: post.user_id,
@@ -207,24 +239,30 @@ export default function PostFeed({ userId, initialPosts }: PostFeedProps) {
     };
   };
 
-  // 에러 상태
-  if (error && posts.length === 0) {
+  // 에러 상태 (에러가 있고 게시물이 없을 때만 표시)
+  if (error && posts.length === 0 && !loading) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-4">
         <p className="text-[#8e8e8e] text-sm mb-4">{error}</p>
         <button
           type="button"
-          onClick={() => {
+          onClick={async () => {
             setError(null);
             setPage(0);
             setHasMore(true);
-            fetchPosts(1, true).then((data) => {
+            setLoading(true);
+            try {
+              const data = await fetchPosts(1, true);
               if (data) {
                 setPosts(data.posts);
                 setHasMore(data.hasMore);
                 setPage(1);
               }
-            });
+            } catch (err) {
+              setError(err instanceof Error ? err.message : '게시물을 불러오는데 실패했습니다.');
+            } finally {
+              setLoading(false);
+            }
           }}
           className="text-[#0095f6] text-sm font-semibold hover:opacity-70 transition-opacity"
         >

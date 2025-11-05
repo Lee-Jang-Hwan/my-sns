@@ -4,6 +4,7 @@ import { koKR } from "@clerk/localizations";
 import { Geist, Geist_Mono } from "next/font/google";
 
 import { SyncUserProvider } from "@/components/providers/sync-user-provider";
+import { FontProvider } from "@/components/providers/font-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -32,9 +33,11 @@ export default function RootLayout({
         <body
           className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         >
-          <SyncUserProvider>
-            {children}
-          </SyncUserProvider>
+          <FontProvider>
+            <SyncUserProvider>
+              {children}
+            </SyncUserProvider>
+          </FontProvider>
         </body>
       </html>
     </ClerkProvider>

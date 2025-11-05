@@ -108,26 +108,48 @@ export default function CreatePostModal({
     }
   };
 
-  // 게시 버튼 클릭 핸들러 (향후 API 연동)
+  // 게시 버튼 클릭 핸들러
   const handleSubmit = async () => {
     if (!selectedFile) {
       alert('이미지를 선택해주세요.');
       return;
     }
 
-    // 향후 API 호출 로직이 여기에 추가됩니다
     setIsSubmitting(true);
-    // TODO: API 호출
-    console.log('게시물 작성:', { file: selectedFile, caption });
-    setIsSubmitting(false);
-    
-    // 성공 시 콜백 호출
-    if (onSuccess) {
-      onSuccess();
+
+    try {
+      // FormData 생성
+      const formData = new FormData();
+      formData.append('image', selectedFile);
+      formData.append('caption', caption);
+
+      // API 호출
+      const response = await fetch('/api/posts', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.details || errorData.error || '게시물 작성에 실패했습니다.');
+      }
+
+      const data = await response.json();
+      console.log('게시물 작성 성공:', data);
+
+      // 성공 시 콜백 호출
+      if (onSuccess) {
+        onSuccess();
+      }
+
+      // 모달 닫기
+      onOpenChange(false);
+    } catch (error) {
+      console.error('게시물 작성 에러:', error);
+      alert(error instanceof Error ? error.message : '게시물 작성에 실패했습니다.');
+    } finally {
+      setIsSubmitting(false);
     }
-    
-    // 모달 닫기
-    onOpenChange(false);
   };
 
   // 게시 버튼 활성화 여부

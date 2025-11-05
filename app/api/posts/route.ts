@@ -25,19 +25,7 @@ import sharp from 'sharp';
  * - @/lib/supabase/service-role: Supabase 클라이언트
  */
 
-interface PostRow {
-  id: string;
-  user_id: string;
-  image_url: string | null;
-  caption: string | null;
-  created_at: string;
-  user: {
-    id: string;
-    name: string;
-  } | null;
-}
-
-interface CommentRow {
+interface CommentWithUser {
   id: string;
   post_id: string;
   user_id: string;
@@ -80,22 +68,10 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 1. 게시물 목록 조회 (users JOIN)
+    // 1. 게시물 목록 조회
     let postsQuery = supabase
       .from('posts')
-      .select(
-        `
-        id,
-        user_id,
-        image_url,
-        caption,
-        created_at,
-        users!posts_user_id_fkey (
-          id,
-          name
-        )
-      `
-      )
+      .select('id, user_id, image_url, caption, created_at')
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -122,10 +98,31 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // 2. 사용자 정보 조회 (user_id 중복 제거 후 한 번에 조회)
+    const userIds = [...new Set(postsData.map((post) => post.user_id))];
+    const { data: usersData, error: usersError } = await supabase
+      .from('users')
+      .select('id, name')
+      .in('id', userIds);
+
+    if (usersError) {
+      console.error('Users query error:', usersError);
+    }
+
+    // 사용자 정보 맵 생성
+    const usersMap = new Map<string, { id: string; name: string; profile_image_url?: string }>();
+    usersData?.forEach((user) => {
+      usersMap.set(user.id, {
+        id: user.id,
+        name: user.name,
+        profile_image_url: undefined, // users 테이블에 profile_image_url 컬럼이 없음
+      });
+    });
+
     const postIds = postsData.map((post) => post.id);
 
-    // 2. 좋아요 수 집계 및 현재 사용자 좋아요 여부 확인
-    let likesQuery = supabase
+    // 3. 좋아요 수 집계 및 현재 사용자 좋아요 여부 확인
+    const likesQuery = supabase
       .from('likes')
       .select('post_id, user_id')
       .in('post_id', postIds);
@@ -151,23 +148,11 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    // 3. 댓글 최신 2개 조회 (각 게시물당)
+    // 4. 댓글 최신 2개 조회 (각 게시물당)
     const commentsPromises = postIds.map((postId) =>
       supabase
         .from('comments')
-        .select(
-          `
-          id,
-          post_id,
-          user_id,
-          content,
-          created_at,
-          users!comments_user_id_fkey (
-            id,
-            name
-          )
-        `
-        )
+        .select('id, post_id, user_id, content, created_at')
         .eq('post_id', postId)
         .order('created_at', { ascending: false })
         .limit(2)
@@ -175,17 +160,44 @@ export async function GET(request: NextRequest) {
 
     const commentsResults = await Promise.all(commentsPromises);
 
-    // 4. 댓글 총 개수 조회 (한 번의 쿼리로 모든 댓글 가져와서 집계)
+    // 5. 댓글 총 개수 조회 (한 번의 쿼리로 모든 댓글 가져와서 집계)
     const { data: allCommentsData } = await supabase
       .from('comments')
       .select('post_id')
       .in('post_id', postIds);
 
+    // 댓글 작성자 ID 수집
+    const commentUserIds = new Set<string>();
+    commentsResults.forEach((result) => {
+      result.data?.forEach((comment) => {
+        commentUserIds.add(comment.user_id);
+      });
+    });
+
+    // 댓글 작성자 정보 조회
+    const { data: commentUsersData } = await supabase
+      .from('users')
+      .select('id, name')
+      .in('id', Array.from(commentUserIds));
+
+    const commentUsersMap = new Map<string, { id: string; name: string }>();
+    commentUsersData?.forEach((user) => {
+      commentUsersMap.set(user.id, { id: user.id, name: user.name });
+    });
+
     // 댓글 데이터 구조화
-    const commentsMap = new Map<string, CommentRow[]>();
+    const commentsMap = new Map<string, CommentWithUser[]>();
     commentsResults.forEach((result, index) => {
       if (result.data) {
-        commentsMap.set(postIds[index], result.data as CommentRow[]);
+        const formattedComments = result.data.map((comment) => ({
+          id: comment.id,
+          post_id: comment.post_id,
+          user_id: comment.user_id,
+          content: comment.content,
+          created_at: comment.created_at,
+          user: commentUsersMap.get(comment.user_id) || null,
+        }));
+        commentsMap.set(postIds[index], formattedComments);
       }
     });
 
@@ -210,7 +222,7 @@ export async function GET(request: NextRequest) {
     const hasMore = (nextPageCount || 0) > 0;
 
     // 응답 데이터 변환
-    const posts = postsData.map((post: PostRow) => {
+    const posts = postsData.map((post) => {
       const comments = commentsMap.get(post.id) || [];
       const formattedComments = comments.map((comment) => ({
         id: comment.id,
@@ -220,19 +232,35 @@ export async function GET(request: NextRequest) {
         created_at: comment.created_at,
       }));
 
+      // 사용자 정보 가져오기
+      const userInfo = usersMap.get(post.user_id);
+
+      if (!userInfo) {
+        console.warn('User not found for post:', {
+          postId: post.id,
+          userId: post.user_id,
+          availableUserIds: Array.from(usersMap.keys()),
+        });
+      }
+
       return {
         id: post.id,
         user_id: post.user_id,
         image_url: post.image_url || undefined,
         caption: post.caption || undefined,
         created_at: post.created_at,
-        user: post.user
+        user: userInfo
           ? {
-              id: post.user.id,
-              name: post.user.name,
-              profile_image_url: undefined, // users 테이블에 profile_image_url 컬럼 없음
+              id: userInfo.id,
+              name: userInfo.name,
+              profile_image_url: userInfo.profile_image_url,
             }
-          : undefined,
+          : {
+              // 사용자 정보가 없어도 기본값 제공
+              id: post.user_id,
+              name: '알 수 없음',
+              profile_image_url: undefined,
+            },
         like_count: likeCountsMap.get(post.id) || 0,
         is_liked: userLikesSet.has(post.id),
         comments: formattedComments,
@@ -351,7 +379,7 @@ export async function POST(request: NextRequest) {
         .toBuffer();
 
       // 리사이징된 Buffer를 Blob으로 변환
-      uploadBlob = new Blob([resizedBuffer], { type: 'image/jpeg' });
+      uploadBlob = new Blob([new Uint8Array(resizedBuffer)], { type: 'image/jpeg' });
 
       console.log('Image resized:', {
         originalSize: imageFile.size,

@@ -142,3 +142,11 @@
     transform: scale(0.8);
   }
 }
+
+/* Next.js Dev Tools 배지 및 버튼 숨기기 */
+[data-next-badge-root],
+[data-nextjs-dev-tools-button],
+[data-next-mark],
+button[id="next-logo"] {
+  display: none !important;
+}

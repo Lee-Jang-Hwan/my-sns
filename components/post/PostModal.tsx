@@ -439,10 +439,15 @@ export default function PostModal({
                   </button>
                 </div>
 
-                {/* 좋아요 수 */}
-                {likeCount > 0 && (
-                  <div className="text-sm font-bold text-[#262626] mb-2">
-                    좋아요 {likeCount.toLocaleString()}개
+                {/* 좋아요 수 및 댓글 수 */}
+                {(likeCount > 0 || (postData?.total_comments ?? 0) > 0) && (
+                  <div className="flex items-center gap-4 text-sm font-bold text-[#262626] mb-2">
+                    {likeCount > 0 && (
+                      <span>좋아요 {likeCount.toLocaleString()}개</span>
+                    )}
+                    {(postData?.total_comments ?? 0) > 0 && (
+                      <span>댓글 {(postData?.total_comments ?? 0).toLocaleString()}개</span>
+                    )}
                   </div>
                 )}
 

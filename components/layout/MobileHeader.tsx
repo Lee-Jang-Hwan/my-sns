@@ -73,14 +73,12 @@ export default function MobileHeader() {
         </SignedIn>
 
         <SignedOut>
-          <SignInButton mode="modal">
-            <button
-              type="button"
-              className="px-4 py-2 text-sm font-semibold text-[#0095f6] hover:opacity-70 transition-opacity"
-            >
-              로그인
-            </button>
-          </SignInButton>
+          <Link
+            href="/sign-in"
+            className="px-4 py-2 text-sm font-semibold text-[#0095f6] hover:opacity-70 transition-opacity"
+          >
+            로그인
+          </Link>
         </SignedOut>
       </div>
     </header>
