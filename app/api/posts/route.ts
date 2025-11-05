@@ -1,17 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { getServiceRoleClient } from '@/lib/supabase/service-role';
+import sharp from 'sharp';
 
 /**
  * @file route.ts
- * @description 게시물 목록 조회 API (페이지네이션 지원)
+ * @description 게시물 목록 조회 및 작성 API
  *
- * 주요 기능:
+ * GET 주요 기능:
  * 1. 게시물 목록 조회 (페이지네이션)
  * 2. 특정 사용자의 게시물 필터링 (userId 파라미터)
  * 3. 좋아요 수 및 현재 사용자 좋아요 여부
  * 4. 댓글 최신 2개 및 총 개수
  * 5. 작성자 정보 (users 테이블 JOIN)
+ *
+ * POST 주요 기능:
+ * 1. 이미지 파일 업로드 (Supabase Storage)
+ * 2. 게시물 데이터 저장 (posts 테이블)
+ * 3. 파일 검증 (이미지 파일, 최대 5MB)
+ * 4. 캡션 검증 (최대 2,200자)
  *
  * @dependencies
  * - @clerk/nextjs/server: Clerk 인증
@@ -243,6 +250,182 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         error: '서버 오류가 발생했습니다.',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * POST: 게시물 작성
+ */
+export async function POST(request: NextRequest) {
+  try {
+    // Clerk 인증 확인
+    const { userId: clerkUserId } = await auth();
+
+    if (!clerkUserId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // FormData 파싱
+    const formData = await request.formData();
+    const imageFile = formData.get('image') as File | null;
+    const caption = (formData.get('caption') as string) || '';
+
+    // 파일 검증
+    if (!imageFile) {
+      return NextResponse.json(
+        { error: 'Bad Request', details: '이미지 파일이 필요합니다.' },
+        { status: 400 }
+      );
+    }
+
+    // 이미지 파일 타입 검증
+    if (!imageFile.type.startsWith('image/')) {
+      return NextResponse.json(
+        { error: 'Bad Request', details: '이미지 파일만 업로드 가능합니다.' },
+        { status: 400 }
+      );
+    }
+
+    // 파일 크기 검증 (최대 5MB)
+    const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+    if (imageFile.size > MAX_FILE_SIZE) {
+      return NextResponse.json(
+        { error: 'Bad Request', details: '파일 크기는 최대 5MB입니다.' },
+        { status: 400 }
+      );
+    }
+
+    // 캡션 길이 검증 (최대 2,200자)
+    const MAX_CAPTION_LENGTH = 2200;
+    if (caption.length > MAX_CAPTION_LENGTH) {
+      return NextResponse.json(
+        { error: 'Bad Request', details: '캡션은 최대 2,200자까지 입력 가능합니다.' },
+        { status: 400 }
+      );
+    }
+
+    // Supabase 클라이언트
+    const supabase = getServiceRoleClient();
+
+    // Clerk user_id를 Supabase users 테이블의 id로 변환
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('clerk_id', clerkUserId)
+      .single();
+
+    if (userError || !userData) {
+      console.error('User lookup error:', userError);
+      return NextResponse.json(
+        { error: 'User not found', details: 'Failed to find user in database' },
+        { status: 404 }
+      );
+    }
+
+    const userId = userData.id;
+
+    // Storage 버킷 이름 (환경 변수 또는 기본값)
+    const storageBucket = process.env.NEXT_PUBLIC_STORAGE_BUCKET || 'uploads';
+
+    // 이미지 리사이징 (1080x1080 정사각형, JPEG, 품질 80%)
+    let resizedBuffer: Buffer;
+    let uploadBlob: Blob;
+    let contentType = 'image/jpeg';
+
+    try {
+      // File을 ArrayBuffer로 변환
+      const arrayBuffer = await imageFile.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      // sharp로 리사이징 (1080x1080 정사각형, cover 모드, 중앙 기준)
+      resizedBuffer = await sharp(buffer)
+        .resize(1080, 1080, {
+          fit: 'cover',
+          position: 'center',
+        })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+
+      // 리사이징된 Buffer를 Blob으로 변환
+      uploadBlob = new Blob([resizedBuffer], { type: 'image/jpeg' });
+
+      console.log('Image resized:', {
+        originalSize: imageFile.size,
+        resizedSize: resizedBuffer.length,
+        reduction: `${Math.round((1 - resizedBuffer.length / imageFile.size) * 100)}%`,
+      });
+    } catch (resizeError) {
+      console.error('Image resize error:', resizeError);
+      // 리사이징 실패 시 원본 이미지 사용 (fallback)
+      uploadBlob = imageFile;
+      contentType = imageFile.type;
+    }
+
+    // 파일명 생성 (타임스탬프 + 랜덤 문자열, 리사이징 후 항상 JPEG)
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+    const filePath = `${clerkUserId}/${fileName}`;
+
+    // Supabase Storage에 이미지 업로드
+    const { error: uploadError } = await supabase.storage
+      .from(storageBucket)
+      .upload(filePath, uploadBlob, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType,
+      });
+
+    if (uploadError) {
+      console.error('Storage upload error:', uploadError);
+      return NextResponse.json(
+        { error: 'Failed to upload image', details: uploadError.message },
+        { status: 500 }
+      );
+    }
+
+    // Storage 공개 URL 생성
+    const { data: urlData } = supabase.storage.from(storageBucket).getPublicUrl(filePath);
+    const imageUrl = urlData.publicUrl;
+
+    // posts 테이블에 데이터 저장
+    const { data: postData, error: insertError } = await supabase
+      .from('posts')
+      .insert({
+        user_id: userId,
+        image_url: imageUrl,
+        caption: caption.trim() || null,
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      console.error('Insert post error:', insertError);
+      // Storage 파일 삭제 시도 (선택)
+      await supabase.storage.from(storageBucket).remove([filePath]);
+      return NextResponse.json(
+        { error: 'Failed to create post', details: insertError.message },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      post: {
+        id: postData.id,
+        user_id: postData.user_id,
+        image_url: postData.image_url,
+        caption: postData.caption,
+        created_at: postData.created_at,
+      },
+    });
+  } catch (error) {
+    console.error('POST /api/posts error:', error);
+    return NextResponse.json(
+      {
+        error: 'Internal server error',
         details: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 500 }
